@@ -286,10 +286,22 @@ class Experiment(abc.ABC):
 
     def _consider_init_wandb(self) -> None:
         if self.training_args.use_wandb and self._is_main_worker:
+            # Allow custom/on-prem W&B servers via env
+            if self.training_args.wandb_base_url:
+                os.environ["WANDB_BASE_URL"] = self.training_args.wandb_base_url
+            if self.training_args.wandb_api_key:
+                os.environ["WANDB_API_KEY"] = self.training_args.wandb_api_key
+
             import wandb
 
+            project_name = (
+                self.training_args.wandb_project
+                if self.training_args.wandb_project
+                else self._wandb_project_name
+            )
             wandb.init(
-                project=self._wandb_project_name,
+                project=project_name,
+                entity=self.training_args.wandb_entity,
                 name=self._wandb_exp_name,
                 id=self.kwargs_hash,
                 resume=True,

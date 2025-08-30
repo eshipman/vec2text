@@ -28,6 +28,7 @@ EMBEDDER_MODEL_NAMES = [
     "meta-llama/Llama-2-7b-chat-hf",
     "meta-llama/Llama-2-13b-chat-hf",
     "nomic-ai/nomic-embed-text-v1",
+    "nomic-ai/nomic-embed-text-v1.5",
     "gpt2",
     "gpt2-medium",
     "gpt2-large",
@@ -245,9 +246,14 @@ def load_embedder_and_tokenizer(name: str, torch_dtype: str, **kwargs):
     elif name.startswith("sentence-transformers/"):
         model = SentenceTransformer(name)
         tokenizer = model.tokenizer
-    elif name.startswith("nomic-ai/nomic-embed-text-v1"):
+    elif name == "nomic-ai/nomic-embed-text-v1":
         model = SentenceTransformer(
             "nomic-ai/nomic-embed-text-v1", trust_remote_code=True
+        )
+        tokenizer = model.tokenizer
+    elif name == "nomic-ai/nomic-embed-text-v1.5":
+        model = SentenceTransformer(
+            "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True
         )
         tokenizer = model.tokenizer
     else:

@@ -265,6 +265,31 @@ class TrainingArguments(transformers.TrainingArguments):
     use_wandb: Optional[bool] = field(
         default=None, metadata={"help": "Whether or not to log to Weights & Biases."}
     )
+    # Optional W&B config for custom/on-prem servers
+    wandb_base_url: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Custom W&B server base URL (e.g., https://wandb.mycompany.com). If set, the trainer sets WANDB_BASE_URL accordingly."
+        },
+    )
+    wandb_api_key: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "W&B API key to use (set WANDB_API_KEY). Prefer environment variable over passing here."
+        },
+    )
+    wandb_entity: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "W&B entity/organization to log under."
+        },
+    )
+    wandb_project: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Override the W&B project name. If unset, uses the experiment default."
+        },
+    )
     report_to: str = "wandb"
     per_device_train_batch_size: int = field(
         default=128, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
