@@ -205,6 +205,7 @@ def make_inversion_args(
     wandb_entity: Optional[str],
     wandb_project: Optional[str],
     streaming: bool,
+    overwrite_output_dir: bool = False,
     max_steps: Optional[int] = None,
 ) -> Tuple[ModelArguments, DataArguments, TrainingArguments]:
     use_deepspeed = try_import_deepspeed() and (platform.system() != "Windows")
@@ -247,6 +248,7 @@ def make_inversion_args(
         experiment="inversion",
         deepspeed=preset["training"].get("deepspeed"),
         mock_embedder=preset["training"].get("mock_embedder", False),
+        overwrite_output_dir=overwrite_output_dir,
     )
 
     # Streaming is incompatible with frozen embeddings + mock embedder.
@@ -283,6 +285,7 @@ def make_corrector_args(
     wandb_entity: Optional[str],
     wandb_project: Optional[str],
     streaming: bool,
+    overwrite_output_dir: bool = False,
     max_steps: Optional[int] = None,
 ) -> Tuple[ModelArguments, DataArguments, TrainingArguments]:
     use_deepspeed = try_import_deepspeed() and (platform.system() != "Windows")
@@ -326,6 +329,7 @@ def make_corrector_args(
         deepspeed=preset["training"].get("deepspeed"),
         mock_embedder=preset["training"].get("mock_embedder", False),
         corrector_model_from_pretrained=corrector_from_pretrained,
+        overwrite_output_dir=overwrite_output_dir,
     )
 
     if streaming:
@@ -357,6 +361,13 @@ def main():
     parser.add_argument("--max-seq-length", type=int, default=128)
     parser.add_argument("--vram", choices=["6+8", "16", "24", "auto"], default="auto")
     parser.add_argument("--output-dir", default=None, help="Output directory. If not set, uses hashed default.")
+    parser.add_argument(
+        "--overwrite_output_dir",
+        "--overwrite-output-dir",
+        dest="overwrite_output_dir",
+        action="store_true",
+        help="Allow overwriting an existing output directory.",
+    )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument("--no-wandb", dest="use_wandb", action="store_false")
     parser.set_defaults(use_wandb=False)
@@ -401,6 +412,7 @@ def main():
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             streaming=args.streaming,
+            overwrite_output_dir=args.overwrite_output_dir,
             max_steps=args.max_steps,
         )
         print("[train] Inverter args:")
@@ -430,6 +442,7 @@ def main():
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             streaming=args.streaming,
+            overwrite_output_dir=args.overwrite_output_dir,
             max_steps=args.max_steps,
         )
         print("[train] Corrector args:")

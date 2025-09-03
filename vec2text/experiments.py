@@ -586,6 +586,13 @@ class Experiment(abc.ABC):
             # Tokenize streams
             tokenized = {}
             for key in ["train", "validation"]:
+                # Remove original string/meta columns (e.g., 'text', 'title', 'docid')
+                # so the DataCollator doesn't try to tensorize them.
+                try:
+                    original_columns = list(raw_datasets[key].features)
+                except Exception:
+                    original_columns = None
+
                 tokenized[key] = dataset_map_multi_worker(
                     dataset=raw_datasets[key],
                     map_fn=tokenize_fn(
@@ -606,7 +613,7 @@ class Experiment(abc.ABC):
                     ),
                     batched=True,
                     batch_size=1024,
-                    remove_columns=None,
+                    remove_columns=original_columns,
                     desc=f"Tokenizing streaming {key}",
                 )
 
@@ -631,6 +638,14 @@ class Experiment(abc.ABC):
                 tokenized["train"] = tokenized["train"].take(
                     self.data_args.use_less_data
                 )
+
+            # Ensure PyTorch tensors are yielded for model inputs
+            try:
+                tokenized["train"].set_format("pt")
+                tokenized["validation"].set_format("pt")
+            except Exception:
+                # IterableDataset may not support full set_format; continue
+                pass
 
             train_dataset = tokenized["train"]
             val_datasets_dict = datasets.DatasetDict(
