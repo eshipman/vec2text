@@ -205,6 +205,7 @@ def make_inversion_args(
     wandb_entity: Optional[str],
     wandb_project: Optional[str],
     streaming: bool,
+    max_steps: Optional[int] = None,
 ) -> Tuple[ModelArguments, DataArguments, TrainingArguments]:
     use_deepspeed = try_import_deepspeed() and (platform.system() != "Windows")
     preset = vram_presets(vram=vram, stage="inverter", use_deepspeed_if_available=use_deepspeed)
@@ -252,6 +253,14 @@ def make_inversion_args(
     if streaming:
         margs.use_frozen_embeddings_as_input = False
         targs.mock_embedder = False
+        # For IterableDataset without __len__, Transformers needs max_steps.
+        if max_steps is not None:
+            targs.max_steps = max_steps
+        else:
+            # Sensible default if user didn't provide one.
+            # Large enough to accommodate warmup/eval intervals.
+            if getattr(targs, "max_steps", -1) is None or targs.max_steps <= 0:
+                targs.max_steps = 100_000
 
     # Windows tends to be more stable with single-process data loading.
     if platform.system() == "Windows":
@@ -274,6 +283,7 @@ def make_corrector_args(
     wandb_entity: Optional[str],
     wandb_project: Optional[str],
     streaming: bool,
+    max_steps: Optional[int] = None,
 ) -> Tuple[ModelArguments, DataArguments, TrainingArguments]:
     use_deepspeed = try_import_deepspeed() and (platform.system() != "Windows")
     preset = vram_presets(vram=vram, stage="corrector", use_deepspeed_if_available=use_deepspeed)
@@ -321,6 +331,11 @@ def make_corrector_args(
     if streaming:
         margs.use_frozen_embeddings_as_input = False
         targs.mock_embedder = False
+        if max_steps is not None:
+            targs.max_steps = max_steps
+        else:
+            if getattr(targs, "max_steps", -1) is None or targs.max_steps <= 0:
+                targs.max_steps = 100_000
 
     if platform.system() == "Windows":
         targs.dataloader_num_workers = 0
@@ -352,6 +367,7 @@ def main():
     parser.add_argument("--wandb-project", default=None, help="Override W&B project name")
 
     parser.add_argument("--streaming", action="store_true", help="Enable dataset streaming to avoid local storage.")
+    parser.add_argument("--max-steps", type=int, default=None, help="When using --streaming, set total training steps (required by HF Trainer when dataset length is unknown).")
 
     # Corrector-specific
     parser.add_argument("--corrector-from-pretrained", default=None, help="Path/name of trained inverter to base corrector on (required if stage is 'corrector').")
@@ -385,6 +401,7 @@ def main():
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             streaming=args.streaming,
+            max_steps=args.max_steps,
         )
         print("[train] Inverter args:")
         print("  model_args:", asdict(margs))
@@ -413,6 +430,7 @@ def main():
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             streaming=args.streaming,
+            max_steps=args.max_steps,
         )
         print("[train] Corrector args:")
         print("  model_args:", asdict(margs))
