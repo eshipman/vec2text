@@ -218,6 +218,12 @@ class DataArguments:
             "help": {"Use a small amount of the training/eval data (for testing)"}
         },
     )
+    streaming: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable HuggingFace datasets streaming to avoid local download and preprocessed storage. Uses IterableDataset and does not save caches."
+        },
+    )
 
     def __post_init__(self):
         if self.dataset_name is None:

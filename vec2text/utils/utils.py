@@ -124,6 +124,9 @@ def torch_main_worker_finish_first(func: Callable):
 def dataset_map_multi_worker(
     dataset: datasets.Dataset, map_fn: Callable, *args, **kwargs
 ) -> datasets.Dataset:
+    # If streaming/iterable, just use plain map without sharding or multiprocessing.
+    if isinstance(dataset, datasets.IterableDataset):
+        return dataset.map(map_fn, *args, **kwargs)
 
     try:
         rank = torch.distributed.get_rank()

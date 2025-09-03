@@ -1,7 +1,7 @@
 import logging
 import os
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import datasets
 import torch
@@ -17,13 +17,15 @@ def retain_dataset_columns(
     return d.remove_columns(column_names_to_remove)
 
 
-def load_nq_dpr_corpus() -> datasets.Dataset:
-    return datasets.load_dataset("jxm/nq_corpus_dpr")
+def load_nq_dpr_corpus(streaming: bool = False) -> datasets.Dataset:
+    return datasets.load_dataset("jxm/nq_corpus_dpr", streaming=streaming)
 
 
-def load_msmarco_corpus() -> datasets.Dataset:
+def load_msmarco_corpus(streaming: bool = False) -> datasets.Dataset:
     # has columns ["title", "text"]. only one split ("train")
-    dataset_dict = datasets.load_dataset("Tevatron/msmarco-passage-corpus")
+    dataset_dict = datasets.load_dataset(
+        "Tevatron/msmarco-passage-corpus", streaming=streaming
+    )
     return dataset_dict["train"]
 
 
@@ -48,99 +50,152 @@ def get_world_size() -> int:
         return 1
 
 
-def load_one_million_paired_instructions() -> datasets.Dataset:
+def load_one_million_paired_instructions(streaming: bool = False) -> datasets.Dataset:
     # has only "train" split, and "system" (system prompt)
     # and "user" (user input) columns
-    dataset_dict = datasets.load_dataset("wentingzhao/one-million-paired-instructions")
-    dataset_dict = dataset_map_multi_worker(
-        dataset_dict,
-        map_fn=create_ompi_ex,
-        num_proc=get_num_proc(),
+    dataset_dict = datasets.load_dataset(
+        "wentingzhao/one-million-paired-instructions", streaming=streaming
     )
+    d = dataset_dict["train"].map(create_ompi_ex)
+    return d
 
-    return dataset_dict["train"]
 
-
-def load_one_million_instructions() -> datasets.Dataset:
+def load_one_million_instructions(streaming: bool = False) -> datasets.Dataset:
     # has only "train" split, and "system" (system prompt)
     # and "user" (user input) columns
-    dataset_dict = datasets.load_dataset("wentingzhao/one-million-instructions")
-    dataset_dict = dataset_map_multi_worker(dataset_dict, create_ompi_ex)
+    dataset_dict = datasets.load_dataset(
+        "wentingzhao/one-million-instructions", streaming=streaming
+    )
+    d = dataset_dict["train"].map(create_ompi_ex)
+    return d
 
-    return dataset_dict["train"]
 
-
-def load_anthropic_toxic_prompts() -> datasets.Dataset:
-    d = datasets.load_dataset("wentingzhao/anthropic-hh-first-prompt")["train"]
+def load_anthropic_toxic_prompts(streaming: bool = False) -> datasets.Dataset:
+    d = datasets.load_dataset(
+        "wentingzhao/anthropic-hh-first-prompt", streaming=streaming
+    )["train"]
     d = d.rename_column("user", "text")
     return d
 
 
-def load_luar_reddit() -> datasets.Dataset:
-    d = datasets.load_dataset("friendshipkim/reddit_eval_embeddings_luar")
+def load_luar_reddit(streaming: bool = False) -> datasets.Dataset:
+    d = datasets.load_dataset(
+        "friendshipkim/reddit_eval_embeddings_luar", streaming=streaming
+    )
     d = d.rename_column("full_text", "text")
     d = d.rename_column("embedding", "frozen_embeddings")
     return d
 
 
 def dataset_from_args(data_args: DataArguments) -> datasets.DatasetDict:
-    """Loads a dataset from data_args create in `run_args`."""
+    """Loads a dataset from data_args created in `run_args`.
+
+    Supports streaming via DataArguments.streaming to avoid local storage.
+    When streaming, train/validation are derived using `.skip()`/`.take()` where needed.
+    """
+    streaming = getattr(data_args, "streaming", False)
+    val_take: int = max(1, int(data_args.max_eval_samples or 1000))
+
     if data_args.dataset_name == "nq":
-        raw_datasets = load_nq_dpr_corpus()
-        raw_datasets["validation"] = raw_datasets["dev"]
+        ds = load_nq_dpr_corpus(streaming=streaming)
+        if streaming:
+            # Expect 'train' and 'dev' splits
+            train = ds["train"]
+            valid = ds["dev"].take(val_take)
+            raw_datasets = datasets.IterableDatasetDict({
+                "train": train,
+                "validation": valid,
+            })
+        else:
+            raw_datasets = ds
+            raw_datasets["validation"] = raw_datasets["dev"]
     elif data_args.dataset_name == "msmarco":
-        raw_datasets = load_msmarco_corpus()
-        raw_datasets = raw_datasets.train_test_split(test_size=0.01)
-        raw_datasets["validation"] = raw_datasets["test"]
+        train_ds = load_msmarco_corpus(streaming=streaming)
+        if streaming:
+            train = train_ds.skip(val_take)
+            valid = train_ds.take(val_take)
+            raw_datasets = datasets.IterableDatasetDict({
+                "train": train,
+                "validation": valid,
+            })
+        else:
+            raw_datasets = train_ds.train_test_split(test_size=0.01)
+            raw_datasets["validation"] = raw_datasets["test"]
     elif data_args.dataset_name == "one_million_instructions":
-        raw_datasets = load_one_million_instructions()
-        raw_datasets = raw_datasets.train_test_split(test_size=0.01)
-        raw_datasets["validation"] = raw_datasets["test"]
+        train_ds = load_one_million_instructions(streaming=streaming)
+        if streaming:
+            train = train_ds.skip(val_take)
+            valid = train_ds.take(val_take)
+            raw_datasets = datasets.IterableDatasetDict({
+                "train": train,
+                "validation": valid,
+            })
+        else:
+            raw_datasets = train_ds.train_test_split(test_size=0.01)
+            raw_datasets["validation"] = raw_datasets["test"]
     elif data_args.dataset_name == "one_million_paired_instructions":
-        raw_datasets = load_one_million_paired_instructions()
-        raw_datasets = raw_datasets.train_test_split(test_size=0.01)
-        raw_datasets["validation"] = raw_datasets["test"]
-    elif data_args.dataset_name == "one_million_instructions":
-        raw_datasets = load_one_million_instructions()
-        raw_datasets = raw_datasets.train_test_split(test_size=0.01)
-        raw_datasets["validation"] = raw_datasets["test"]
+        train_ds = load_one_million_paired_instructions(streaming=streaming)
+        if streaming:
+            train = train_ds.skip(val_take)
+            valid = train_ds.take(val_take)
+            raw_datasets = datasets.IterableDatasetDict({
+                "train": train,
+                "validation": valid,
+            })
+        else:
+            raw_datasets = train_ds.train_test_split(test_size=0.01)
+            raw_datasets["validation"] = raw_datasets["test"]
     elif data_args.dataset_name == "luar_reddit":
-        all_luar_datasets = load_luar_reddit()
-        raw_datasets = datasets.DatasetDict(
-            {
-                "train": all_luar_datasets["candidates"],
-                "validation": all_luar_datasets["queries"],
-            }
-        )
+        all_luar_datasets = load_luar_reddit(streaming=streaming)
+        # For LUAR, 'queries' is a natural validation split
+        valid = all_luar_datasets["queries"]
+        if streaming:
+            valid = valid.take(val_take)
+            raw_datasets = datasets.IterableDatasetDict(
+                {"train": all_luar_datasets["candidates"], "validation": valid}
+            )
+        else:
+            raw_datasets = datasets.DatasetDict(
+                {
+                    "train": all_luar_datasets["candidates"],
+                    "validation": valid,
+                }
+            )
     else:
         raise ValueError(f"unsupported dataset {data_args.dataset_name}")
     return raw_datasets
 
 
-def load_ag_news_test() -> datasets.Dataset:
-    return datasets.load_dataset("ag_news")["test"]
+def load_ag_news_test(streaming: bool = False) -> datasets.Dataset:
+    return datasets.load_dataset("ag_news", streaming=streaming)["test"]
 
 
-def load_xsum_val(col: str) -> datasets.Dataset:
-    d = datasets.load_dataset("xsum")["validation"]
+def load_xsum_val(col: str, streaming: bool = False) -> datasets.Dataset:
+    d = datasets.load_dataset("xsum", streaming=streaming)["validation"]
     d = d.rename_column(col, "text")
     return d
 
 
-def load_wikibio_val() -> datasets.Dataset:
-    d = datasets.load_dataset("wiki_bio", trust_remote_code=True)["val"]
+def load_wikibio_val(streaming: bool = False) -> datasets.Dataset:
+    d = datasets.load_dataset("wiki_bio", trust_remote_code=True, streaming=streaming)[
+        "val"
+    ]
     d = d.rename_column("target_text", "text")
     return d
 
 
-def load_arxiv_val() -> datasets.Dataset:
-    d = datasets.load_dataset("ccdv/arxiv-summarization")["validation"]
+def load_arxiv_val(streaming: bool = False) -> datasets.Dataset:
+    d = datasets.load_dataset("ccdv/arxiv-summarization", streaming=streaming)[
+        "validation"
+    ]
     d = d.rename_column("abstract", "text")
     return d
 
 
-def load_python_code_instructions_18k_alpaca() -> datasets.Dataset:
-    d = datasets.load_dataset("iamtarun/python_code_instructions_18k_alpaca")["train"]
+def load_python_code_instructions_18k_alpaca(streaming: bool = False) -> datasets.Dataset:
+    d = datasets.load_dataset(
+        "iamtarun/python_code_instructions_18k_alpaca", streaming=streaming
+    )["train"]
     d = d.rename_column("instruction", "text")
     return d
 
@@ -239,17 +294,22 @@ def load_beir_datasets() -> datasets.DatasetDict:
     return datasets.DatasetDict({k: load_beir_dataset(k) for k in all_beir_datasets})
 
 
-def load_standard_val_datasets() -> datasets.DatasetDict:
+def load_standard_val_datasets(streaming: bool = False, max_eval_samples: Optional[int] = None) -> datasets.DatasetDict:
     """Loads a pre-defined set of standard val datasets."""
     d = {
-        "ag_news": load_ag_news_test(),
-        "anthropic_toxic_prompts": load_anthropic_toxic_prompts(),
-        "arxiv": load_arxiv_val(),
-        "python_code_alpaca": load_python_code_instructions_18k_alpaca(),
-        # "xsum_doc": load_xsum_val("document"),
-        # "xsum_summ": load_xsum_val("summary"),
-        "wikibio": load_wikibio_val(),
+        "ag_news": load_ag_news_test(streaming=streaming),
+        "anthropic_toxic_prompts": load_anthropic_toxic_prompts(streaming=streaming),
+        "arxiv": load_arxiv_val(streaming=streaming),
+        "python_code_alpaca": load_python_code_instructions_18k_alpaca(
+            streaming=streaming
+        ),
+        # "xsum_doc": load_xsum_val("document", streaming=streaming),
+        # "xsum_summ": load_xsum_val("summary", streaming=streaming),
+        "wikibio": load_wikibio_val(streaming=streaming),
     }
     d = {k: retain_dataset_columns(v, ["text"]) for k, v in d.items()}
+    if streaming and max_eval_samples:
+        # Limit samples from each stream
+        d = {k: v.take(max_eval_samples) for k, v in d.items()}
 
     return datasets.DatasetDict(d)

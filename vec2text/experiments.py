@@ -193,14 +193,21 @@ class Experiment(abc.ABC):
         # *** Evaluation ***
         logger.info("*** Evaluate ***")
         trainer = self.load_trainer()
-        num_eval_samples = len(trainer.eval_dataset)
+        try:
+            num_eval_samples = len(trainer.eval_dataset)
+        except Exception:
+            # For streaming datasets, length may be undefined
+            num_eval_samples = self.data_args.max_eval_samples
         metrics = trainer.evaluate()
         max_eval_samples = (
             self.data_args.max_eval_samples
             if self.data_args.max_eval_samples is not None
             else num_eval_samples
         )
-        metrics["eval_samples"] = min(max_eval_samples, num_eval_samples)
+        try:
+            metrics["eval_samples"] = min(max_eval_samples, num_eval_samples)
+        except Exception:
+            metrics["eval_samples"] = max_eval_samples
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
         return metrics
@@ -547,6 +554,73 @@ class Experiment(abc.ABC):
         tokenizer: transformers.AutoTokenizer,
         embedder_tokenizer: transformers.AutoTokenizer,
     ):
+        # Streaming path: avoid on-disk caching and use IterableDataset
+        if getattr(self.data_args, "streaming", False):
+            if self.model_args.use_frozen_embeddings_as_input:
+                raise ValueError(
+                    "use_frozen_embeddings_as_input=True is incompatible with streaming. "
+                    "Disable it to compute embeddings on-the-fly."
+                )
+
+            tokenize_fn = (
+                tokenize_function_llama_chat
+                if self.is_llama_chat
+                else tokenize_function
+            )
+            # Load raw streaming datasets with small validation slice
+            raw_datasets = dataset_from_args(self.data_args)
+            # Tokenize streams
+            tokenized = {}
+            for key in ["train", "validation"]:
+                tokenized[key] = dataset_map_multi_worker(
+                    dataset=raw_datasets[key],
+                    map_fn=tokenize_fn(
+                        tokenizer=tokenizer,
+                        embedder_tokenizer=embedder_tokenizer,
+                        text_column_name="text",
+                        max_seq_length=self.model_args.max_seq_length,
+                        padding=False,
+                        prefix=(
+                            "search_document"
+                            if self.model_args.embedder_model_name
+                            == "nomic-ai/nomic-embed-text-v1"
+                            else None
+                        ),
+                    ),
+                    batched=True,
+                    batch_size=1024,
+                    remove_columns=None,
+                    desc=f"Tokenizing streaming {key}",
+                )
+
+            # Filter empty examples
+            tokenized["train"] = tokenized["train"].filter(
+                lambda ex: ex["length"] > 1
+            )
+            tokenized["validation"] = tokenized["validation"].filter(
+                lambda ex: ex["length"] > 1
+            )
+
+            # Shuffle training stream for better mixing
+            try:
+                tokenized["train"] = tokenized["train"].shuffle(
+                    seed=self.training_args.seed, buffer_size=10_000
+                )
+            except Exception:
+                pass
+
+            # Optionally limit training size for quick tests
+            if self.data_args.use_less_data and (self.data_args.use_less_data > 0):
+                tokenized["train"] = tokenized["train"].take(
+                    self.data_args.use_less_data
+                )
+
+            train_dataset = tokenized["train"]
+            val_datasets_dict = datasets.DatasetDict(
+                {self.data_args.dataset_name: tokenized["validation"]}
+            )
+            return train_dataset, val_datasets_dict
+
         dataset_kwargs: Dict[str, str] = self.dataset_kwargs
 
         # Only set this if it's true, for backwards-compatibility with

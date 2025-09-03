@@ -204,6 +204,7 @@ def make_inversion_args(
     wandb_api_key: Optional[str],
     wandb_entity: Optional[str],
     wandb_project: Optional[str],
+    streaming: bool,
 ) -> Tuple[ModelArguments, DataArguments, TrainingArguments]:
     use_deepspeed = try_import_deepspeed() and (platform.system() != "Windows")
     preset = vram_presets(vram=vram, stage="inverter", use_deepspeed_if_available=use_deepspeed)
@@ -214,7 +215,7 @@ def make_inversion_args(
         max_seq_length=max_seq_length,
         use_frozen_embeddings_as_input=preset["model"].get("use_frozen_embeddings_as_input", False),
     )
-    dargs = DataArguments(dataset_name=dataset)
+    dargs = DataArguments(dataset_name=dataset, streaming=streaming)
     targs = TrainingArguments(
         output_dir=(output_dir or None),
         per_device_train_batch_size=preset["training"]["per_device_train_batch_size"],
@@ -247,6 +248,11 @@ def make_inversion_args(
         mock_embedder=preset["training"].get("mock_embedder", False),
     )
 
+    # Streaming is incompatible with frozen embeddings + mock embedder.
+    if streaming:
+        margs.use_frozen_embeddings_as_input = False
+        targs.mock_embedder = False
+
     # Windows tends to be more stable with single-process data loading.
     if platform.system() == "Windows":
         targs.dataloader_num_workers = 0
@@ -267,6 +273,7 @@ def make_corrector_args(
     wandb_api_key: Optional[str],
     wandb_entity: Optional[str],
     wandb_project: Optional[str],
+    streaming: bool,
 ) -> Tuple[ModelArguments, DataArguments, TrainingArguments]:
     use_deepspeed = try_import_deepspeed() and (platform.system() != "Windows")
     preset = vram_presets(vram=vram, stage="corrector", use_deepspeed_if_available=use_deepspeed)
@@ -277,7 +284,7 @@ def make_corrector_args(
         max_seq_length=max_seq_length,
         use_frozen_embeddings_as_input=preset["model"].get("use_frozen_embeddings_as_input", False),
     )
-    dargs = DataArguments(dataset_name=dataset)
+    dargs = DataArguments(dataset_name=dataset, streaming=streaming)
     targs = TrainingArguments(
         output_dir=(output_dir or None),
         per_device_train_batch_size=preset["training"]["per_device_train_batch_size"],
@@ -310,6 +317,10 @@ def make_corrector_args(
         mock_embedder=preset["training"].get("mock_embedder", False),
         corrector_model_from_pretrained=corrector_from_pretrained,
     )
+
+    if streaming:
+        margs.use_frozen_embeddings_as_input = False
+        targs.mock_embedder = False
 
     if platform.system() == "Windows":
         targs.dataloader_num_workers = 0
@@ -371,6 +382,7 @@ def main():
             wandb_api_key=args.wandb_api_key,
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
+            streaming=args.streaming,
         )
         print("[train] Inverter args:")
         print("  model_args:", asdict(margs))
@@ -398,6 +410,7 @@ def main():
             wandb_api_key=args.wandb_api_key,
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
+            streaming=args.streaming,
         )
         print("[train] Corrector args:")
         print("  model_args:", asdict(margs))
@@ -406,5 +419,6 @@ def main():
         run_experiment(margs, dargs, targs)
 
 
+    parser.add_argument("--streaming", action="store_true", help="Enable dataset streaming to avoid local storage.")
 if __name__ == "__main__":
     main()
