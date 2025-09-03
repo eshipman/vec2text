@@ -96,6 +96,15 @@ class Experiment(abc.ABC):
         self.model_args = model_args
         self.data_args = data_args
         self.training_args = training_args
+        # When streaming (IterableDataset), HF Trainer requires group_by_length=False
+        # because bucketing relies on random access and known lengths.
+        if getattr(self.data_args, "streaming", False):
+            try:
+                self.training_args.group_by_length = False
+            except Exception:
+                # TrainingArguments may be frozen; our subclass allows mutation,
+                # but guard just in case.
+                pass
         # Set random seed, add hash to output path.
         transformers.set_seed(training_args.seed)
 
