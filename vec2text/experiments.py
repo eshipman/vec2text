@@ -426,10 +426,15 @@ class Experiment(abc.ABC):
                     "text",
                     self.model_args.max_seq_length,
                     padding=False,
-                    prefix="search_document"
-                    if self.model_args.embedder_model_name
-                    == "nomic-ai/nomic-embed-text-v1"
-                    else None,
+                    prefix=(
+                        "search_document"
+                        if self.model_args.embedder_model_name
+                        in {
+                            "nomic-ai/nomic-embed-text-v1",
+                            "nomic-ai/nomic-embed-text-v1.5",
+                        }
+                        else None
+                    ),
                 ),
                 batched=True,
                 num_proc=get_num_proc(),
@@ -592,7 +597,10 @@ class Experiment(abc.ABC):
                         prefix=(
                             "search_document"
                             if self.model_args.embedder_model_name
-                            == "nomic-ai/nomic-embed-text-v1"
+                            in {
+                                "nomic-ai/nomic-embed-text-v1",
+                                "nomic-ai/nomic-embed-text-v1.5",
+                            }
                             else None
                         ),
                     ),

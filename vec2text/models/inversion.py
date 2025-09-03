@@ -136,6 +136,26 @@ class InversionModel(transformers.PreTrainedModel):
     def get_output_embeddings(self):
         return self.encoder_decoder.get_output_embeddings()
 
+    # Enable/disable gradient checkpointing by delegating to the underlying
+    # encoder-decoder model when available. This allows using
+    # `TrainingArguments.gradient_checkpointing=True` with our wrapper.
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None):
+        fn = getattr(self.encoder_decoder, "gradient_checkpointing_enable", None)
+        if callable(fn):
+            try:
+                return fn(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)
+            except TypeError:
+                # Older Transformers do not accept kwargs
+                return fn()
+        # If the underlying model doesn't support it, fall back silently
+        # (Trainer will proceed without checkpointing).
+        logger.warning("encoder_decoder does not support gradient checkpointing; continuing without it.")
+
+    def gradient_checkpointing_disable(self):
+        fn = getattr(self.encoder_decoder, "gradient_checkpointing_disable", None)
+        if callable(fn):
+            return fn()
+
     def _freeze_encoder(self):
         freeze_params(self.encoder_decoder.encoder)
 
