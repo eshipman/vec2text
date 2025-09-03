@@ -351,6 +351,8 @@ def main():
     parser.add_argument("--wandb-entity", default=None, help="W&B entity/organization")
     parser.add_argument("--wandb-project", default=None, help="Override W&B project name")
 
+    parser.add_argument("--streaming", action="store_true", help="Enable dataset streaming to avoid local storage.")
+
     # Corrector-specific
     parser.add_argument("--corrector-from-pretrained", default=None, help="Path/name of trained inverter to base corrector on (required if stage is 'corrector').")
 
@@ -419,6 +421,5 @@ def main():
         run_experiment(margs, dargs, targs)
 
 
-    parser.add_argument("--streaming", action="store_true", help="Enable dataset streaming to avoid local storage.")
 if __name__ == "__main__":
     main()
