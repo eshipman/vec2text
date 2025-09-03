@@ -125,17 +125,44 @@ def dataset_map_multi_worker(
     dataset: datasets.Dataset, map_fn: Callable, *args, **kwargs
 ) -> datasets.Dataset:
     # If streaming/iterable, just use plain map without sharding or multiprocessing.
+    # Some versions of datasets.IterableDataset.map don't accept certain kwargs (e.g., 'desc').
     if isinstance(dataset, datasets.IterableDataset):
-        return dataset.map(map_fn, *args, **kwargs)
+        safe_kwargs = dict(kwargs)
+        # Remove kwargs that IterableDataset.map may not accept.
+        for k in [
+            "desc",
+            "num_proc",
+            "new_fingerprint",
+            "load_from_cache_file",
+        ]:
+            safe_kwargs.pop(k, None)
+        try:
+            return dataset.map(map_fn, *args, **safe_kwargs)
+        except TypeError as e:
+            # Fallback: aggressively strip optional kwargs if signature mismatch persists
+            minimal_kwargs = {
+                k: v
+                for k, v in safe_kwargs.items()
+                if k
+                not in {"remove_columns", "features", "writer_batch_size", "batch_size"}
+            }
+            return dataset.map(map_fn, *args, **minimal_kwargs)
 
     try:
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         kwargs["num_proc"] = kwargs.get("num_proc", get_num_proc())
     except (RuntimeError, ValueError):
-        # In non-distributed mode, just run regular map()
+        # In non-distributed mode, just run regular map() with a safe fallback for older HF versions
         kwargs["num_proc"] = kwargs.get("num_proc", get_num_proc())
-        return dataset.map(map_fn, *args, **kwargs)
+        try:
+            return dataset.map(map_fn, *args, **kwargs)
+        except TypeError as e:
+            # Older datasets versions may not accept 'desc'; retry without it.
+            if "desc" in str(e):
+                kwargs.pop("desc", None)
+                return dataset.map(map_fn, *args, **kwargs)
+            raise
     datasets.disable_caching()
 
     cache_path = os.environ.get(
@@ -151,7 +178,15 @@ def dataset_map_multi_worker(
         index=rank,
         contiguous=True,
     )
-    ds_shard = ds_shard.map(map_fn, *args, **kwargs)
+    # Apply map to the shard with a safe fallback for older HF versions
+    try:
+        ds_shard = ds_shard.map(map_fn, *args, **kwargs)
+    except TypeError as e:
+        if "desc" in str(e):
+            kwargs.pop("desc", None)
+            ds_shard = ds_shard.map(map_fn, *args, **kwargs)
+        else:
+            raise
     ds_shard.save_to_disk(ds_shard_filepaths[rank])
     print("rank", rank, "saving:", ds_shard_filepaths[rank])
     torch.distributed.barrier()
