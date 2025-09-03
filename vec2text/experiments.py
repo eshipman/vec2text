@@ -443,7 +443,11 @@ class Experiment(abc.ABC):
             )
         tokenized_datasets = raw_datasets
         ###########################################################################
-        tokenized_datasets["train"].set_format("pt")
+        # Only tensorize model input/label columns to avoid collator issues with
+        # non-standard fields like embedder_*.
+        tokenized_datasets["train"].set_format(
+            type="torch", columns=["input_ids", "attention_mask", "labels"]
+        )
         tokenized_datasets["train"] = tokenized_datasets["train"].add_column(
             "idx", range(len(tokenized_datasets["train"]))
         )
@@ -480,7 +484,9 @@ class Experiment(abc.ABC):
         tokenized_datasets["validation"] = tokenized_datasets["validation"].add_column(
             "idx", range(len(tokenized_datasets["validation"]))
         )
-        tokenized_datasets["validation"].set_format("pt")
+        tokenized_datasets["validation"].set_format(
+            type="torch", columns=["input_ids", "attention_mask", "labels"]
+        )
         ###########################################################################
         return tokenized_datasets
 
@@ -499,7 +505,6 @@ class Experiment(abc.ABC):
             val_datasets_dict[name] = val_datasets_dict[name].add_column(
                 "idx", range(len(val_datasets_dict[name]))
             )
-            val_datasets_dict[name].set_format("pt")
 
         tokenize_fn = (
             tokenize_function_llama_chat if self.is_llama_chat else tokenize_function
@@ -520,6 +525,15 @@ class Experiment(abc.ABC):
                 num_proc=get_num_proc(),
                 desc="Running tokenizer on dataset",
             )
+
+        # Only tensorize model input/label columns
+        for key in val_datasets_dict:
+            try:
+                val_datasets_dict[key].set_format(
+                    type="torch", columns=["input_ids", "attention_mask", "labels"]
+                )
+            except Exception:
+                pass
 
         # filter out empty examples (these exist for xsum documents).
         val_datasets_dict = val_datasets_dict.filter(lambda ex: ex["length"] > 1)
@@ -638,14 +652,6 @@ class Experiment(abc.ABC):
                 tokenized["train"] = tokenized["train"].take(
                     self.data_args.use_less_data
                 )
-
-            # Ensure PyTorch tensors are yielded for model inputs
-            try:
-                tokenized["train"].set_format("pt")
-                tokenized["validation"].set_format("pt")
-            except Exception:
-                # IterableDataset may not support full set_format; continue
-                pass
 
             train_dataset = tokenized["train"]
             val_datasets_dict = datasets.DatasetDict(

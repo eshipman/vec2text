@@ -41,7 +41,6 @@ def tokenize_function(
             padding="max_length",
             truncation=True,
             max_length=max_seq_length,
-            return_tensors="pt",
         )
         embedder_output = {f"embedder_{k}": v for k, v in embedder_output.items()}
 
@@ -105,7 +104,6 @@ def tokenize_function_llama_chat(
             padding="max_length",
             truncation=True,
             max_length=max_seq_length,
-            return_tensors="pt",
         )
         embedder_output = {f"embedder_{k}": v for k, v in embedder_output.items()}
 
