@@ -34,6 +34,7 @@ from vec2text.tokenize_data import (
     tokenize_function_llama_chat,
 )
 from vec2text.utils import MockEmbedder, dataset_map_multi_worker, get_num_proc
+from vec2text.trainers.progress import ProgressCallback
 
 # Allow W&B to start slowly.
 os.environ["WANDB__SERVICE_WAIT"] = "300"
@@ -777,13 +778,24 @@ class InversionExperiment(Experiment):
             del model.embedder
             model.embedder = MockEmbedder(embedder_dim=model.embedder_dim)
 
-        return self.trainer_cls(
+        trainer = self.trainer_cls(
             model=model,
             args=self.training_args,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             data_collator=self.get_collator(tokenizer=model.tokenizer),
         )
+        # Enable optional embedding cosine similarity metric in generation metrics
+        try:
+            trainer.enable_emb_cos_sim_metric()
+        except Exception:
+            pass
+        # Add a progress/ETA callback (main process only)
+        try:
+            trainer.add_callback(ProgressCallback())
+        except Exception:
+            pass
+        return trainer
 
 
 class InversionExperimentUnet(InversionExperiment):

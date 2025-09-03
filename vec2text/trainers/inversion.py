@@ -26,9 +26,13 @@ class InversionTrainer(BaseTrainer):
         """
         Performs a training step. we override to compute data-specific metrics.
         """
-        # TODO: Log training metrics from below... (How to do with huggingface?)
-        self._compute_data_metrics(inputs=inputs)
-        # self.log({ f"train/{k}": v for k,v in metrics.items() })
+        # Compute and log a few simple data metrics (token stats)
+        try:
+            data_metrics = self._compute_data_metrics(inputs=inputs)
+            if isinstance(data_metrics, dict) and len(data_metrics):
+                self.log({f"train/{k}": v for k, v in data_metrics.items()})
+        except Exception:
+            pass
         return super().training_step(model, inputs)
 
     def evaluation_loop(
@@ -49,6 +53,18 @@ class InversionTrainer(BaseTrainer):
         except OverflowError:
             perplexity = float("inf")
         output.metrics[f"{metric_key_prefix}_perplexity"] = perplexity
+
+        # Add generation-based metrics (BLEU/ROUGE/EM, token stats, optional emb metrics)
+        try:
+            gen_metrics = self.eval_generation_metrics(
+                dataloader=kwargs.get("dataloader", args[0])
+            )
+            if isinstance(gen_metrics, dict) and len(gen_metrics):
+                output.metrics.update(
+                    {f"{metric_key_prefix}_{k}": v for k, v in gen_metrics.items()}
+                )
+        except Exception:
+            pass
 
         return output
 
